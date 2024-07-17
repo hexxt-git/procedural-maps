@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>procedural terrain</title>
+	</head>
+	<body>
+		<div id="container">
+			<canvas></canvas>
+		</div>
+	</body>
+
+	<style>
+		body {
+			margin: 0;
+			height: 100vh;
+			box-sizing: border-box;
+			padding: 20px;
+			background: #000;
+		}
+		#container {
+			width: 100%;
+			height: 100%;
+			display: inline-flex;
+			align-items: baseline;
+			justify-content: center;
+		}
+	</style>
+
+	<script>
+		const container = document.querySelector('#container');
+		const canvas = document.querySelector('canvas');
+		const ctx = canvas.getContext('2d');
+
+		resX = 200;
+		resY = 200;
+
+		let scale = 10;
+
+		const updateScale = () => {
+			const resolution = Math.min(container.clientHeight, container.clientWidth);
+			canvas.width = resolution;
+			canvas.height = resolution;
+			scale = Math.min(resolution / resX, resolution / resY);
+		};
+		updateScale();
+		window.addEventListener('resize', updateScale);
+
+		const colors = [
+			'#121261',
+			'#0f0f75',
+			'#0f0f77',
+			'#050585',
+			'#2461b1',
+			'#125891',
+			'#28d',
+			'#a72',
+			'#4a2',
+			'#392',
+			'#273',
+			'#271',
+			'#251',
+			'#232',
+			'#111',
+			'#444',
+			'#666',
+			'#999',
+			'#fff',
+		];
+
+		// const colors = ['#1c4296', '#2269bb', '#da9e27', '#298317' , '#1d660e', '#7d8a88'];
+
+		const map = new Array(resX).fill([]).map((row, x) =>
+			new Array(resY).fill(0).map((cell, y) => {
+				return Math.floor(Math.random() * colors.length);
+			})
+		);
+
+		const render = () => {
+			ctx.clearRect(0, 0, canvas.width, canvas.height);
+			map.forEach((row, x) =>
+				row.forEach((cell, y) => {
+					ctx.fillStyle = colors[cell];
+					ctx.fillRect(x * scale, y * scale, scale + 1, scale + 1);
+				})
+			);
+		};
+		render();
+
+		const attempts_per_step = 10;
+		const check_radius = 4;
+		let randomization = 0.99;
+
+		const calculate_entropy = (x, y, value) => {
+			let entropy = 0;
+			for (let i = x - check_radius; i <= x + check_radius; i++) {
+				for (let j = y - check_radius; j <= y + check_radius; j++) {
+					const wrappedX = (i + resX) % resX;
+					const wrappedY = (j + resY) % resY;
+					// const wrappedX = Math.max(Math.min(i, resX - 1), 0);
+					// const wrappedY = Math.max(Math.min(j, resY - 1), 0);
+
+					const difference = Math.abs(value - map[wrappedX][wrappedY]);
+					// entropy += difference > 1 ? 1 : 0;
+					entropy += difference > 3 ? (2 + difference > 1 ? 1 : 0) : 0;
+				}
+			}
+			return entropy;
+		};
+
+		const step = () => {
+			const x = Math.floor(Math.random() * resX);
+			const y = Math.floor(Math.random() * resY);
+
+			const entropy = calculate_entropy(x, y, map[x][y]);
+			// if (entropy == 0) return;
+
+			let best_val = map[x][y];
+			let best_entropy = entropy;
+
+			let max_attempts = 10;
+			let attempt = 0;
+			while (attempt < max_attempts && best_entropy > 1) {
+				attempt++;
+				const test_val = Math.floor(Math.random() * colors.length);
+				const test_entropy = calculate_entropy(x, y, test_val);
+				if (test_entropy < best_entropy || Math.random() > randomization) {
+					best_entropy = test_entropy;
+					best_val = test_val;
+				}
+			}
+			map[x][y] = best_val;
+		};
+
+		const animate = () => {
+			for (let i = 0; i < 10000; i++) step();
+			render();
+
+			requestAnimationFrame(animate);
+		};
+		animate();
+	</script>
+</html>

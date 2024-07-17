@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>procedural terrain</title>
+	</head>
+	<body>
+		<div id="container">
+			<canvas></canvas>
+		</div>
+	</body>
+
+	<style>
+		body {
+			margin: 0;
+			height: 100vh;
+			box-sizing: border-box;
+			padding: 20px;
+			background: #000;
+		}
+		#container {
+			width: 100%;
+			height: 100%;
+			display: flex;
+			justify-content: center;
+			align-items: center;
+		}
+	</style>
+
+	<script>
+		const container = document.querySelector('#container');
+		const canvas = document.querySelector('canvas');
+		const ctx = canvas.getContext('2d');
+
+		resX = 200;
+		resY = 200;
+
+		let scale = 10;
+
+		const updateScale = () => {
+			const resolution = Math.min(container.clientHeight, container.clientWidth);
+			canvas.width = resolution;
+			canvas.height = resolution;
+			scale = Math.min(resolution / resX, resolution / resY);
+		};
+		updateScale();
+		window.addEventListener('resize', updateScale);
+
+		const perlin_texture = (resX, resY, scale) => {
+			function randomGradient() {
+				const angle = Math.random() * 2 * Math.PI;
+				return { x: Math.cos(angle), y: Math.sin(angle) };
+			}
+
+			const gradient_vectors = new Array(resX).fill(0).map(() => new Array(resY).fill(0).map(randomGradient));
+
+			function perlin_noise(x, y, gradient_vectors) {
+				const x0 = Math.floor(x);
+				const x1 = x0 + 1;
+				const y0 = Math.floor(y);
+				const y1 = y0 + 1;
+
+				const dx = x - x0;
+				const dy = y - y0;
+
+				const g00 = gradient_vectors[x0 % resX][y0 % resY];
+				const g10 = gradient_vectors[x1 % resX][y0 % resY];
+				const g01 = gradient_vectors[x0 % resX][y1 % resY];
+				const g11 = gradient_vectors[x1 % resX][y1 % resY];
+
+				const dotProduct = (v1, v2) => {
+					return v1.x * v2.x + v1.y * v2.y;
+				};
+
+				const dot00 = dotProduct({ x: dx, y: dy }, g00);
+				const dot10 = dotProduct({ x: dx - 1, y: dy }, g10);
+				const dot01 = dotProduct({ x: dx, y: dy - 1 }, g01);
+				const dot11 = dotProduct({ x: dx - 1, y: dy - 1 }, g11);
+
+				const smoothstep = (t) => {
+					return t * t * (3 - 2 * t);
+				};
+
+				const sx = smoothstep(dx);
+				const sy = smoothstep(dy);
+
+				const lerp = (a, b, t) => {
+					return a + t * (b - a);
+				};
+
+				const lerp1 = lerp(dot00, dot10, sx);
+				const lerp2 = lerp(dot01, dot11, sx);
+
+				return lerp(lerp1, lerp2, sy);
+			}
+
+			// Find min and max noise values
+			let minNoise = 0;
+			let maxNoise = 0;
+
+			const noiseValues = [];
+			for (let x = 0; x < resX; x++) {
+				noiseValues.push([]);
+				for (let y = 0; y < resY; y++) {
+					const value = perlin_noise(x / scale, y / scale, gradient_vectors);
+					noiseValues[x].push(value);
+					minNoise = Math.min(minNoise, value);
+					maxNoise = Math.max(maxNoise, value);
+				}
+			}
+
+			// Normalize the noise value to [0, 1] range
+			function normalize(value, min, max) {
+				return (value - min) / (max - min);
+			}
+			for (let x = 0; x < resX; x++) {
+				for (let y = 0; y < resY; y++) {
+					noiseValues[x][y] = normalize(noiseValues[x][y], minNoise, maxNoise);
+				}
+			}
+
+			return noiseValues;
+		};
+
+		function add_maps(map1, map2) {
+			const width = map1.length;
+			const height = map1[0].length;
+			const result = new Array(width);
+			for (let x = 0; x < width; x++) {
+				result[x] = new Array(height);
+				for (let y = 0; y < height; y++) {
+					result[x][y] = map1[x][y] + map2[x][y];
+				}
+			}
+			return result;
+		}
+
+		function scale_map(map, scale) {
+			const width = map.length;
+			const height = map[0].length;
+			const result = new Array(width);
+			for (let x = 0; x < width; x++) {
+				result[x] = new Array(height);
+				for (let y = 0; y < height; y++) {
+					result[x][y] = map[x][y] * scale;
+				}
+			}
+			return result;
+		}
+
+		function generate_layered_noise(width, height, octaves, persistence, lacunarity, initial_scale) {
+			let current_scale = initial_scale;
+			let current_multiplier = 1;
+			let combined_textures = perlin_texture(width, height, current_scale);
+
+			for (let i = 1; i < octaves; i++) {
+				current_scale /= lacunarity;
+				current_multiplier *= persistence;
+				let new_texture = perlin_texture(width, height, current_scale);
+				combined_textures = add_maps(combined_textures, scale_map(new_texture, current_multiplier));
+			}
+
+			return combined_textures;
+		}
+
+		// Normalize the noise values to [0, 1] range
+		function normalize_map(map) {
+			let min = Infinity;
+			let max = -Infinity;
+
+			// Find min and max values
+			for (let row of map) {
+				for (let value of row) {
+					if (value < min) min = value;
+					if (value > max) max = value;
+				}
+			}
+
+			// Normalize
+			const range = max - min;
+			return map.map((row) => row.map((value) => (value - min) / range));
+		}
+
+		// Main rendering function
+		function render_noise(ctx, noise_map, scale) {
+			const width = noise_map.length;
+			const height = noise_map[0].length;
+
+			for (let x = 0; x < width; x++) {
+				for (let y = 0; y < height; y++) {
+					const interpolateColors = (colors, value) => {
+						const colorCount = colors.length;
+						const index = Math.floor(value * (colorCount - 1));
+						const color1 = colors[index];
+						const color2 = colors[(index + 1) % colorCount];
+						const t = value * (colorCount - 1) - index;
+
+						const lerp = (a, b, t) => {
+							return a + t * (b - a);
+						};
+
+						const r = Math.round(lerp(color1[0], color2[0], t));
+						const g = Math.round(lerp(color1[1], color2[1], t));
+						const b = Math.round(lerp(color1[2], color2[2], t));
+
+						return `rgb(${r}, ${g}, ${b})`;
+					};
+
+					const colors = [
+						'rgb(43, 43, 112)',
+						'rgb(38, 95, 170)',
+						'rgb(43, 127, 184)',
+						'rgb(209, 162, 60)',
+						'rgb(64, 119, 42)',
+						'rgb(56, 97, 40)',
+						'rgb(55, 114, 31)',
+						'rgb(71, 71, 71)',
+						'rgb(34, 34, 34)',
+						'rgb(187, 187, 187)',
+						'rgb(187, 187, 187)',
+					].map((color) => color.match(/\d+/g).map(Number));
+
+					const value = Math.max(
+						noise_map[x][y] +
+							Math.random() * 0.05 -
+							Math.sqrt((x - width / 2) ** 2 + (y - height / 2) ** 2) / (resY / 1.5),
+							Math.random() * 0.006
+					);
+
+					const colorValue = interpolateColors(colors, value);
+					ctx.fillStyle = colorValue;
+					ctx.fillRect(x * scale, y * scale, scale + 1, scale + 1);
+				}
+			}
+		}
+
+		const persistence = 0.5;
+		const lacunarity = 2;
+		const initial_scale = 80;
+		const octaves = 20;
+
+		let combined_textures = generate_layered_noise(resX, resY, octaves, persistence, lacunarity, initial_scale);
+		combined_textures = normalize_map(combined_textures);
+
+		render_noise(ctx, combined_textures, scale);
+	</script>
+</html>
+z
